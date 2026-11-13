@@ -86,6 +86,7 @@ VOCABULARY: dict[str, tuple[str, ...]] = {
         "other",
     ),
     "endpoint_category": ("overall_survival", "progression_free_survival", "other"),
+    "endpoint_role": ("primary", "secondary", "unknown"),
     "effect_measure": (
         "mean_difference",
         "hazard_ratio",
@@ -366,6 +367,7 @@ _FIELDS: tuple[tuple[str, str, str | None, str], ...] = (
     ),
     ("arms[].treatments[].dose", "text", None, "Dose as stated (reference only)"),
     ("endpoints[].title", "text", None, "Registered endpoint title"),
+    ("endpoints[].role", "choice", "endpoint_role", "Primary (default) or secondary"),
     (
         "endpoints[].family",
         "catalog key",
@@ -785,6 +787,7 @@ class Endpoint(_Record):
 
     _fields = (
         "title",
+        "role",
         "family",
         "category",
         "effect_measure",
@@ -798,6 +801,7 @@ class Endpoint(_Record):
         trial: "Trial",
         title: str,
         *,
+        role=None,
         family=None,
         category=None,
         effect_measure=None,
@@ -806,7 +810,8 @@ class Endpoint(_Record):
         notes=None,
     ):
         object.__setattr__(self, "_trial", trial)
-        self.title, self.family, self.category = title, family, category
+        self.title, self.role = title, role
+        self.family, self.category = family, category
         self.effect_measure, self.hypothesis = effect_measure, hypothesis
         self.time_frame, self.notes = time_frame, notes
 
@@ -818,6 +823,8 @@ class Endpoint(_Record):
             value = value.lower().replace(" ", "_") if value else None
         elif name == "category":
             value = choose("endpoint_category", value)
+        elif name == "role":
+            value = choose("endpoint_role", value)
         elif name == "effect_measure":
             value = choose("effect_measure", value)
         elif name == "hypothesis":
@@ -871,12 +878,20 @@ class EndpointList(_Collection):
             self.remove(endpoint)
 
     def _headers(self):
-        return ["Endpoint", "Family", "Effect measure", "Hypothesis", "Time frame"]
+        return [
+            "Endpoint",
+            "Role",
+            "Family",
+            "Effect measure",
+            "Hypothesis",
+            "Time frame",
+        ]
 
     def _rows(self):
         return [
             [
                 e.title,
+                _label(e.role or "primary"),
                 _label(e.family),
                 _label(e.effect_measure),
                 _label(e.hypothesis),
@@ -1344,6 +1359,7 @@ class Trial:
                     k: v
                     for k, v in {
                         "title": e.title,
+                        "role": e.role,
                         "family": e.family,
                         "category": e.category,
                         "effectMeasure": e.effect_measure,
@@ -1437,6 +1453,7 @@ class Trial:
                     endpoint.get("title")
                     or _label(endpoint.get("category"))
                     or "Endpoint",
+                    role=endpoint.get("role"),
                     family=endpoint.get("family"),
                     category=endpoint.get("category"),
                     effect_measure=endpoint.get("effectMeasure"),
@@ -1535,6 +1552,7 @@ class Trial:
             endpoint = Endpoint(
                 trial,
                 title,
+                role=analysis.get("endpointRole") or None,
                 family=e.get("family") or None,
                 category=(
                     e.get("kind")
@@ -1748,7 +1766,8 @@ class TrialReview:
         lines += [
             f"  unresolved: {e.get('name')} ({e.get('status')})" for e in unresolved
         ]
-        lines += [f"  note: {n}" for n in self.assumptions]
+        if self.assumptions:
+            lines.append(f"  {len(self.assumptions)} model notes: see .assumptions")
         return "\n".join(lines)
 
     def _repr_html_(self) -> str:
@@ -1785,9 +1804,9 @@ class TrialReview:
             )
         if self.assumptions:
             parts.append(
-                "<ul>"
+                f"<details><summary>{len(self.assumptions)} model notes</summary><ul>"
                 + "".join(f"<li>{_escape(a)}</li>" for a in self.assumptions)
-                + "</ul>"
+                + "</ul></details>"
             )
         return "".join(parts)
 
